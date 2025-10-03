@@ -413,7 +413,341 @@ class HomeView(ttk.Frame):
         if self.app:
              self.app.set_status("Ready", running=False)  # Set status
 
+    def _on_result(self, err, result):
+        """Handle task result or error."""
+        for w in self.output_frame.winfo_children():
+            w.destroy()  # Clear output (including loading)
+        self._reset_run_state()  # Reset state
+        if err:
+            self._handle_error(str(err))  # Handle error
+            return
+        task_label = self.task_var.get()  # Get task
+        output_frame = ttk.Frame(self.output_frame)  # New output frame
+        output_frame.pack(fill="both", expand=True)  # Pack
+        output_frame.columnconfigure(0, weight=1)  # Column weight
+        output_frame.columnconfigure(1, weight=1)  # Column weight
+
+        if task_label.lower().startswith("image"):
+            # Show image first (top), then caption and metadata below
+            if self.preview_image:
+                try:
+                    thumb = self.preview_image.copy()  # Copy image
+
+                    # Calculate a safe max size so the image won't overflow the output panel.
+                    # If widget width isn't available yet, fall back to sensible defaults.
+                    frame_w = self.output_frame.winfo_width() or 800
+                    frame_h = self.output_frame.winfo_height() or 600
+                    max_w = max(100, min(760, frame_w - 20))
+                    max_h = max(80, min(560, frame_h - 80))
+
+                    # Resize thumbnail to fit inside the output area
+                    thumb.thumbnail((int(max_w), int(max_h)), Image.LANCZOS)
+                    thumb_img = ImageTk.PhotoImage(thumb)  # PhotoImage
+                    thumb_label = ttk.Label(output_frame, image=thumb_img)  # Label for image
+                    thumb_label.image = thumb_img  # Reference
+                    thumb_label.grid(row=0, column=0, columnspan=2, pady=6, sticky="nsew")  # Place at top spanning columns
+                    thumb_label.bind("<Button-1>", self._open_full_image)  # Bind open
+                except Exception:
+                    pass
+
+            # Add "Caption:" label before the actual caption text
+            caption = result[0].get("generated_text", "")  # Get caption
+            caption_tag = ttk.Label(output_frame, text="Caption:", font=("Segoe UI", 12, "bold"))
+            caption_tag.grid(row=1, column=0, sticky="nw", padx=(4, 8), pady=5)
+
+            # Ensure caption wraps within the output panel width
+            wrap_len = int(min(760, (self.output_frame.winfo_width() or 800) - 40))
+            # Show generated text on the next row, with smaller font
+            caption_label = ttk.Label(output_frame, text=caption, font=("Segoe UI", 12), wraplength=wrap_len, justify="left")
+            caption_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)  # Put on the row after the "Caption:" tag
+            caption_label.bind("<Button-1>", lambda e: self._edit_caption(output_frame, caption_label, caption))  # Bind edit
+
+            ttk.Label(output_frame, text=f"Generated at: {time.strftime('%H:%M:%S')}", font=("Segoe UI", 10)).grid(row=3, column=0, sticky="w")  # Timestamp moved down
+
+            # Success animation / checkmark (moved down)
+            check = ttk.Label(output_frame, text="✔", font=("Segoe UI", 14), foreground="#21C197")  # Checkmark
+            check.grid(row=3, column=1, sticky="e")  # Grid
+            self.after(1000, check.destroy)  # Destroy after 1s
+
+        else:
+            label = result[0]["label"]  # Get label
+            score = result[0]["score"]  # Get score
+            color = "#21C197" if label == "POSITIVE" else "#F87171" if label == "NEGATIVE" else "#FBBF24"  # Color based on label
+            badge = ttk.Label(output_frame, text=label, background=color, foreground="#fff", padding=6, relief="raised")  # Badge label
+            badge.grid(row=0, column=0, sticky="w", pady=5)  # Grid
+            ttk.Label(output_frame, text=f"Score: {score:.2f}", font=("Segoe UI", 12)).grid(row=1, column=0, sticky="w")  # Score label
+            prog = ttk.Progressbar(output_frame, value=score*100, length=200)  # Progress bar
+            prog.grid(row=2, column=0, sticky="w", pady=5, columnspan=2)  # Grid spanning
+            input_text_label = ttk.Label(output_frame, text=self.text_input.get("1.0", "end").strip(), wraplength=200)  # Input text label
+            input_text_label.grid(row=3, column=0, sticky="w", columnspan=2)  # Grid spanning
+            # Success animation
+            check = ttk.Label(output_frame, text="✔", font=("Segoe UI", 14), foreground="#21C197")  # Checkmark
+            check.grid(row=1, column=1, sticky="e")  # Grid
+            self.after(1000, check.destroy)  # Destroy
+
+        if self.save_history_var.get():
+            item = {  # Create history item
+                "ts": time.strftime("%H:%M:%S"),  # Timestamp
+                "task": task_label,  # Task
+                "result": result,  # Result
+            }
+            # Append to shared history on the app when available
+            try:
+                if self.app and hasattr(self.app, "history_items"):
+                    self.app.history_items.append(item)
+                else:
+                    self.history_items.append(item)
+                self.history_list.insert("end", f"{item['ts']} — {item['task']}")
+            except Exception:
+                pass
+
+    def _edit_caption(self, output_frame, caption_label, initial_caption):
+        """Edit image caption inline."""
+        # Place the edit entry in the same grid cell as the caption_label
+        info = caption_label.grid_info()
+        row = info.get("row", 0)
+        col = info.get("column", 0)
+        colspan = info.get("columnspan", 1)
+        entry = ttk.Entry(output_frame, font=("Segoe UI", 12))  # Entry for edit (smaller font to match)
+        entry.insert(0, initial_caption)  # Insert initial
+        caption_label.grid_remove()  # Remove label
+        entry.grid(row=row, column=col, columnspan=colspan, sticky="w", pady=5)  # Grid in same spot
+
+        def save_caption(_e=None):
+            new_caption = entry.get()  # Get new
+            new_label = ttk.Label(output_frame, text=new_caption, font=("Segoe UI", 12), wraplength=400, justify="left")  # New label (smaller)
+            new_label.grid(row=row, column=col, columnspan=colspan, sticky="w", pady=5)  # Grid in same spot
+            entry.grid_remove()  # Remove entry
+            new_label.bind("<Button-1>", lambda e: self._edit_caption(output_frame, new_label, new_caption))  # Bind edit
+        entry.bind("<Return>", save_caption)  # Bind return to save
+
+    def _open_history_item(self, _event=None):
+        """Open selected history item in output."""
+        idxs = self.history_list.curselection()  # Get selection
+        if not idxs:
+            return  # No selection
+        idx = idxs[0]  # Get index
+        item = self.history_items[idx]  # Get item
+        for w in self.output_frame.winfo_children():
+            w.destroy()  # Clear output
+        output_frame = ttk.Frame(self.output_frame)  # New frame
+        output_frame.pack(fill="both", expand=True)  # Pack
+        ttk.Label(output_frame, text=json.dumps(item, indent=2, default=str), font=("Segoe UI", 12), wraplength=400).pack(anchor="w")  # Display JSON
+
+    def _handle_error(self, message):
+        """Handle and display error."""
+        for w in self.output_frame.winfo_children():
+            w.destroy()  # Clear output
+        error_label = ttk.Label(self.output_frame, text=f"Error: {message}", foreground="#F87171", font=("Segoe UI", 12))  # Error label
+        error_label.pack(anchor="w", pady=5)  # Pack
+        self._reset_run_state()  # Reset state
+        if self.app:
+            self.app.last_error = message  # Set last error
+            self.app.log(f"Error: {message}")  # Log
+            self.app.set_status(f"Error: {message}", running=False)  # Set status
+        self._border_btn_effect()  # Border effect on button
+
+    def _border_btn_effect(self, button=None):
+        """Add border effect on button click."""
+        if button is None:
+            button = self.run_btn  # Default to run button
+            
+        # Get current style and add border effect
+        original_style = button.cget('style') or 'TButton'
+        
+        # Create a temporary style with border
+        style = ttk.Style()
+        style.configure('BorderEffect.TButton', borderwidth=3, relief='solid')
+        
+        # Apply border effect
+        button.configure(style='BorderEffect.TButton')
+        
+        # Reset after 200ms
+        self.after(200, lambda: button.configure(style=original_style))
+
+    def copy_result(self):
+        """Copy result to clipboard."""
+        try:
+            import pyperclip  # Import pyperclip
+            
+            # Find the nested output frame that contains the actual widgets
+            output_children = self.output_frame.winfo_children()
+            if not output_children:
+                print("No output to copy")
+                return
+                
+            nested_frame = output_children[0]  # The nested output_frame
+            
+            if self.task_var.get().lower().startswith("image"):
+                # For image tasks, get the caption label at row=0, column=0
+                widgets = nested_frame.grid_slaves(row=2, column=0)
+                if widgets:
+                    caption_label = widgets[0]
+                    caption_text = caption_label.cget("text")
+                    pyperclip.copy(caption_text)
+                    print(f"Copied image caption: {caption_text}")
+                else:
+                    print("No caption found to copy")
+            else:
+                # For sentiment analysis, get badge, score, and text
+                try:
+                    badge_widgets = nested_frame.grid_slaves(row=0, column=0)
+                    score_widgets = nested_frame.grid_slaves(row=1, column=0)
+                    text_widgets = nested_frame.grid_slaves(row=3, column=0)
+                    
+                    if badge_widgets and score_widgets and text_widgets:
+                        badge_text = badge_widgets[0].cget("text")
+                        score_text = score_widgets[0].cget("text")
+                        input_text = text_widgets[0].cget("text")
+                        
+                        formatted_result = f"{badge_text} ({score_text})\nText: {input_text}"
+                        pyperclip.copy(formatted_result)
+                        print(f"Copied sentiment result: {formatted_result}")
+                    else:
+                        print("Missing widgets for sentiment analysis copy")
+                except Exception as e:
+                    print(f"Error copying sentiment result: {e}")
+                    
+        except ImportError:
+            print("pyperclip not available - cannot copy to clipboard")
+        except Exception as e:
+            print(f"Error copying result: {e}")
+
+    def copy_panels(self):
+        """Copy model and OOP panels to clipboard."""
+        txt = "Model Info:\n" + self.model_panel.get("1.0", "end") + "\nOOP:\n"  # Start text
+        for item in self.info_panel.get_children():  # Loop parents
+            txt += self.info_panel.item(item)["text"] + "\n"  # Add parent
+            for child in self.info_panel.get_children(item):  # Loop children
+                txt += "  " + self.info_panel.item(child)["text"] + "\n"  # Add child
+        try:
+            import pyperclip  # Import pyperclip
+            pyperclip.copy(txt)  # Copy
+        except Exception:
+            pass  # Ignore
+
+    def _update_info_panel(self):
+        """Update model and OOP info panels based on task."""
+        task_label = self.task_var.get()
+        self.model_panel.configure(state="normal")
+        self.model_panel.delete("1.0", "end")
+        self.info_panel.delete(*self.info_panel.get_children())
     
+        if task_label.lower().startswith("image"):
+            # Image to Text Model Information
+            model_id = "nlpconnect/vit-gpt2-image-captioning"
+            model_info = (
+                "Task: Image → Text (Captioning)\n"
+                f"Model ID: {model_id}\n"
+                "Library: Transformers pipeline(image-to-text)\n"
+                "Description: Vision Transformer (ViT) encoder with GPT-2 decoder\n"
+                "Input: Image files (PNG, JPG, JPEG, BMP)\n"
+                "Output: Text captions describing image content\n"
+                "Use Case: Automatic image description and accessibility"
+            )
+        
+            # OOP Concepts for Image Model
+            oop = [
+                ("Multiple Inheritance", "ImageCaptionWrapper → BaseModelWrapper + PreprocessMixin", [
+                    "Location: hf_wrapper.py, Class: ImageCaptionWrapper",
+                    "Implementation: class ImageCaptionWrapper(BaseModelWrapper, PreprocessMixin)",
+                    "Why Used: Combines model management logic with image preprocessing functionality",
+                    "Benefit: Code reuse and separation of concerns"
+                ]),
+                ("Multiple Decorators", "@timing + @simple_cache on process() method", [
+                    "Location: hf_wrapper.py, Method: ImageCaptionWrapper.process",
+                    "@timing: Measures inference execution time for performance monitoring",
+                    "@simple_cache: Prevents redundant processing of identical images",
+                    "Why Used: Performance optimization and resource management",
+                    "Benefit: Faster repeated requests and performance tracking"
+                ]),
+                ("Encapsulation", "Private attributes and controlled access", [
+                    "Location: hf_wrapper.py, Class: BaseModelWrapper",
+                    "Attributes: _model_name, _pipeline, _loaded, _last_time",
+                    "Why Used: Protect internal model state from external modification",
+                    "Benefit: Data integrity and controlled access patterns"
+                ]),
+                ("Polymorphism", "process() method overridden for image-specific logic", [
+                    "Location: hf_wrapper.py, Method: ImageCaptionWrapper.process",
+                    "Implementation: Overrides abstract process() from BaseModelWrapper",
+                    "Why Used: Custom image preprocessing (PIL conversion, RGB format)",
+                    "Benefit: Consistent interface with task-specific implementation"
+                ]),
+                ("Abstract Base Class", "BaseModelWrapper defines interface", [
+                    "Location: hf_wrapper.py, Class: BaseModelWrapper (ABC)",
+                    "Methods: load(), process() marked as @abstractmethod",
+                    "Why Used: Enforce consistent interface across all model wrappers",
+                    "Benefit: Standardized model integration pattern"
+                ]),
+                ("Mixins", "PreprocessMixin for reusable image utilities", [
+                    "Location: hf_wrapper.py, Class: PreprocessMixin",
+                    "Method: pil_to_rgb() for image format standardization",
+                    "Why Used: Share common image processing across multiple classes",
+                    "Benefit: Avoid code duplication and promote consistency"
+                ])
+            ]
+        else:
+            # Sentiment Analysis Model Information
+            model_id = "tabularisai/multilingual-sentiment-analysis"
+            model_info = (
+                "Task: Sentiment Analysis\n"
+                f"Model ID: {model_id}\n"
+                "Library: Transformers pipeline(text-classification)\n"
+                "Description: Multilingual sentiment classification model\n"
+                "Input: Text input (up to 3000 characters)\n"
+                "Output: Sentiment label (POSITIVE/NEGATIVE) with confidence score\n"
+                "Use Case: Text sentiment analysis and emotion detection"
+            )
+        
+            # OOP Concepts for Sentiment Model
+            oop = [
+                ("Method Overriding", "SentimentWrapper.process() custom implementation", [
+                    "Location: hf_wrapper.py, Method: SentimentWrapper.process",
+                    "Implementation: Overrides abstract process() from BaseModelWrapper",
+                    "Why Used: Text-specific processing without image preprocessing",
+                    "Benefit: Tailored implementation for text classification"
+                ]),
+                ("Single Decorator", "@timing on process() method", [
+                    "Location: hf_wrapper.py, Method: SentimentWrapper.process",
+                    "Function: Measures inference time for text processing",
+                    "Why Used: Performance monitoring without caching (text varies more)",
+                    "Benefit: Track model performance without storage overhead"
+                ]),
+                ("Encapsulation", "Model state management through base class", [
+                    "Location: hf_wrapper.py, Class: BaseModelWrapper",
+                    "Attributes: _model_name, _pipeline, _loaded, _last_time",
+                    "Why Used: Centralized state management for all model types",
+                    "Benefit: Consistent model lifecycle management"
+                ]),
+                ("Inheritance Hierarchy", "Single inheritance from BaseModelWrapper", [
+                    "Location: hf_wrapper.py, Class: SentimentWrapper",
+                    "Implementation: class SentimentWrapper(BaseModelWrapper)",
+                    "Why Used: Inherit common model functionality without image processing",
+                    "Benefit: Simpler class structure for text-only models"
+                ]),
+                ("Abstract Method Implementation", "Concrete load() and process() methods", [
+                    "Location: hf_wrapper.py, Class: SentimentWrapper",
+                    "Implementation: Provides actual implementation for abstract methods",
+                    "Why Used: Fulfill interface contract defined by BaseModelWrapper",
+                    "Benefit: Ensures all model wrappers have required functionality"
+                ]),
+                ("Device Management", "Automatic CPU/GPU detection", [
+                    "Location: hf_wrapper.py, Function: get_device_for_transformers()",
+                    "Usage: Both models use same device detection logic",
+                    "Why Used: Cross-platform compatibility and performance optimization",
+                    "Benefit: Automatic hardware optimization without user configuration"
+                ])
+            ]
+    
+        # Update model information panel
+        self.model_panel.insert("end", model_info)
+        self.model_panel.configure(state="disabled")
+        
+        # Update OOP concepts panel
+        for title, desc, details in oop:
+            parent = self.info_panel.insert("", "end", text=f"{title}: {desc}")
+            for detail in details:
+                self.info_panel.insert(parent, "end", text=detail)
 
     def _toggle_inputs(self):
         """Toggle input frames based on selected task."""
