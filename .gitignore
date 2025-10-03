@@ -1,0 +1,70 @@
+# Virtual environment
+venv/
+
+# Byte code cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Specific cache directories
+app/__pycache__/
+app/controllers/__pycache__/
+app/models/__pycache__/
+app/views/__pycache__/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Keep these files and directories
+!requirements.txt
+!main.py
+!app/
+!app/__init__.py
+!app/gui.py
+!app/utils.py
+!app/oop_docs.txt
+!app/model_info.md
+!app/help.md
+!app/controllers/
+!app/controllers/model_controller.py
+!app/models/
+!app/models/hf_wrapper.py
+!app/views/
+!app/views/home_view.py
+!tests/
+!outputs/
+
+# But ignore any other files in app directories that aren't explicitly kept
+app/*
+!app/__init__.py
+!app/utils.py
+!app/gui.py
+!app/oop_docs.txt
+!app/model_info.md
+!app/help.md
+!app/controllers/
+!app/models/
+!app/views/
+
+app/controllers/*
+!app/controllers/model_controller.py
+
+app/models/*
+!app/models/hf_wrapper.py
+
+app/views/*
+!app/views/home_view.py
