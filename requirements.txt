@@ -1,0 +1,12 @@
+transformers==4.35.0
+accelerate==0.20.3
+Pillow==10.0.0
+pyperclip==1.8.2
+
+# Optional
+# tkinterdnd2
+
+# Notes:
+# - tkinter is part of the Python standard library (ensure tcl/tk component is installed with Python).
+# - If you need an exact reproduction, generate a pinned list on the working machine:
+#     pip freeze > pinned-requirements.txt
