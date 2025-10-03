@@ -270,12 +270,11 @@ Tkinter_AI_GUI_Project/
 │   │   └── home_view.py       # Main interface components
 │   ├── help.md               # Help documentation
 │   ├── model_info.md         # Model information
-│   └── oop_docs.txt          # OOP concepts documentation
+│   
 ├── assets/
 │   └── sample.jpg            # Sample image for testing
 ├── main.py                   # Application entry point
 ├── requirements.txt          # Python dependencies
-├── verify_installation.py   # Installation verification script
 └── README.md                # This file
 ```
 
